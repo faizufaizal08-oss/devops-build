@@ -1,0 +1,9 @@
+version: "3.9"
+
+services:
+  web:
+    build: .
+    container_name: react-static-prod
+    ports:
+      - "80:80"
+    restart: unless-stopped
