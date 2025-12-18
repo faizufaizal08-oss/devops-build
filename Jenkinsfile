@@ -2,18 +2,13 @@ pipeline {
     agent any
 
     environment {
-        // Docker Hub repos
         IMAGE_DEV = "faizalfaizu/react-dev"
         IMAGE_PROD = "faizalfaizu/react-prod"
-
-        // Docker image name inside Jenkins
-        IMAGE_NAME = "react-static-prod"
     }
 
     stages {
         stage('Checkout') {
             steps {
-                // Checkout the branch that triggered the build
                 checkout scm
             }
         }
@@ -21,30 +16,34 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    echo "Building Docker image..."
-                    sh "docker build --no-cache -t ${IMAGE_NAME} ."
+                    // Detect current branch
+                    def branch = sh(script: "git rev-parse --abbrev-ref HEAD", returnStdout: true).trim()
+                    env.BRANCH = branch
+                    echo "Building Docker image for branch: ${branch}"
+
+                    // Use branch-specific image
+                    if(branch == 'dev') {
+                        sh "docker build -t ${IMAGE_DEV}:latest ."
+                    } else if(branch == 'main') {
+                        sh "docker build -t ${IMAGE_PROD}:latest ."
+                    } else {
+                        error "Branch ${branch} not configured for build"
+                    }
                 }
             }
         }
 
-        stage('Push to Docker Hub') {
+        stage('Docker Login & Push') {
             steps {
-                script {
-                    def branch = env.BRANCH_NAME ?: 'dev'
-                    echo "Current branch: ${branch}"
+                withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
+                }
 
-                    if(branch == 'dev') {
-                        echo "Tagging and pushing to dev repo..."
-                        sh "docker tag ${IMAGE_NAME} ${IMAGE_DEV}:latest"
+                script {
+                    if(env.BRANCH == 'dev') {
                         sh "docker push ${IMAGE_DEV}:latest"
-                    } 
-                    else if(branch == 'main') {
-                        echo "Tagging and pushing to prod repo..."
-                        sh "docker tag ${IMAGE_NAME} ${IMAGE_PROD}:latest"
+                    } else if(env.BRANCH == 'main') {
                         sh "docker push ${IMAGE_PROD}:latest"
-                    } 
-                    else {
-                        echo "Branch ${branch} not configured for Docker push."
                     }
                 }
             }
@@ -53,11 +52,10 @@ pipeline {
         stage('Deploy') {
             steps {
                 script {
-                    echo "Deploying container..."
+                    def imageToRun = env.BRANCH == 'dev' ? IMAGE_DEV : IMAGE_PROD
                     sh """
-                        CONTAINER_NAME=${IMAGE_NAME}
-                        docker rm -f $CONTAINER_NAME || true
-                        docker run -d -p 80:80 --name $CONTAINER_NAME ${IMAGE_NAME}
+                        docker rm -f react-app || true
+                        docker run -d -p 80:80 --name react-app ${imageToRun}:latest
                     """
                 }
             }
@@ -66,10 +64,7 @@ pipeline {
 
     post {
         always {
-            script {
-                echo "Cleaning up Docker login"
-                sh "docker logout || true"
-            }
+            sh 'docker logout || true'
         }
     }
 }
