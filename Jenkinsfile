@@ -2,64 +2,45 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = "react-static-prod"
-        DOCKERHUB_USER = "faizufaizal08" 
-        DEV_REPO = "${DOCKERHUB_USER}/dev"
-        PROD_REPO = "${DOCKERHUB_USER}/prod"
+        IMAGE_NAME_DEV = "faizalfaizu/react-dev"
+        IMAGE_NAME_PROD = "faizalfaizu/react-prod"
     }
 
     stages {
-
-        stage('Checkout') {
-            steps {
-                
-                git branch: env.BRANCH_NAME,
-                    url: 'https://github.com/faizufaizal08-oss/devops-build.git'
-            }
-        }
-
         stage('Build Docker Image') {
             steps {
-                sh 'docker build -t $IMAGE_NAME .'
+                script {
+                    def branch = env.BRANCH_NAME ?: 'dev'
+                    if(branch == 'dev') {
+                        sh './build.sh'
+                    } else if(branch == 'main') {
+                        sh './build.sh'
+                    }
+                }
             }
         }
 
         stage('Push to Docker Hub') {
             steps {
                 script {
-                    if (env.BRANCH_NAME == 'dev' || env.BRANCH_NAME == 'master') {
-                        
-                        withCredentials([usernamePassword(
-                            credentialsId: 'dockerhub-creds',
-                            usernameVariable: 'DOCKERHUB_USERNAME',
-                            passwordVariable: 'DOCKERHUB_PASSWORD'
-                        )]) {
-                            def repo = (env.BRANCH_NAME == 'dev') ? "${DEV_REPO}:latest" : "${PROD_REPO}:latest"
-                            sh """
-                                docker login -u $DOCKERHUB_USERNAME -p $DOCKERHUB_PASSWORD
-                                docker tag $IMAGE_NAME $repo
-                                docker push $repo
-                            """
-                        }
+                    def branch = env.BRANCH_NAME ?: 'dev'
+                    if(branch == 'dev') {
+                        sh "docker tag react-static-prod ${IMAGE_NAME_DEV}"
+                        sh "docker push ${IMAGE_NAME_DEV}"
+                    } else if(branch == 'main') {
+                        sh "docker tag react-static-prod ${IMAGE_NAME_PROD}"
+                        sh "docker push ${IMAGE_NAME_PROD}"
                     }
                 }
             }
         }
 
         stage('Deploy') {
-            when {
-                branch 'master'
-            }
             steps {
-                sh './deploy.sh'
+                script {
+                    sh './deploy.sh'
+                }
             }
-        }
-    }
-
-    post {
-        always {
-            echo 'Cleaning up Docker login'
-            sh 'docker logout'
         }
     }
 }
